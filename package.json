@@ -1,0 +1,19 @@
+{
+  "name": "shop-to-woo-sync",
+  "version": "1.0.0",
+  "description": "export Shopify products and collections to WordPress/Woocommerce store",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index --env-file=.env"
+  },
+  "keywords": [
+    "shopify",
+    "woocommerce"
+  ],
+  "author": "Youssef ACHCHIRAJ",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7"
+  }
+}
