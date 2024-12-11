@@ -8,6 +8,14 @@ function splitToChunks(array, size = 10) {
   return chunks;
 }
 
+function getNextPageUrlFromHeader(linkHeader) {
+  if (!linkHeader) return null;
+
+  const match = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
+  return match ? match[1] : null;
+}
+
 module.exports = {
   splitToChunks,
+  getNextPageUrlFromHeader
 };
