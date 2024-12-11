@@ -8,7 +8,9 @@ const {
 dotenv.config();
 
 async function fetchShopifyProducts() {
-  const { data } = await shopifyClient.get("products.json");
+  const { data } = await shopifyClient.get(
+    "products.json?limit=250&status=active"
+  );
   return data.products;
 }
 
@@ -30,7 +32,7 @@ async function createWooCategory(payload) {
 
 async function fetchShopifyCollectionProducts(collectionId) {
   const { data } = await shopifyClient.get(
-    `collections/${collectionId}/products.json`
+    `collections/${collectionId}/products.json?limit=250&status=active`
   );
 
   return data.products;
@@ -49,7 +51,9 @@ async function fetchWooCategoryBySlug(slug) {
     params: { slug },
   });
 
-  return data;
+  if (data.length > 0) return data[0];
+
+  return null;
 }
 
 async function createWooProduct(payload) {
@@ -67,7 +71,7 @@ async function linkWooProductWithVariants(productId, payload) {
   return data;
 }
 
-async function linkWooProductWithCategory(productId, payload) {
+async function updateWooProduct(productId, payload) {
   const { data } = await wcClient.put(`products/${productId}`, payload);
 
   return data;
@@ -78,19 +82,45 @@ async function transferShopifyVariantsToWoo(
   productId,
   productOptions
 ) {
-  for (const variant of variants) {
-    const variantPayload = {
-      regular_price: variant.price,
-      description: variant.title,
-      sku: variant.sku,
-      attributes: productOptions.map((option, index) => ({
-        name: option.name,
-        option: variant[`option${index + 1}`],
-      })),
-    };
+  await Promise.all(
+    variants.map((variant) => {
+      const variantPayload = {
+        regular_price: variant.price,
+        description: variant.title,
+        attributes: productOptions.map((option, index) => ({
+          name: option.name,
+          option: variant[`option${index + 1}`],
+        })),
+      };
 
-    await linkWooProductWithVariants(productId, variantPayload);
-  }
+      return linkWooProductWithVariants(productId, variantPayload);
+    })
+  );
+}
+
+async function createFringesVariants(productId) {
+  const fringesVariants = [
+    { option: "No Fringes" },
+    { option: "One Side" },
+    { option: "Both Sides" },
+  ];
+
+  await Promise.all(
+    fringesVariants.map((fringe) => {
+      const fringePayload = {
+        regular_price: "0.00",
+        description: fringe.option,
+        attributes: [
+          {
+            name: "Fringes",
+            option: fringe.option,
+          },
+        ],
+      };
+
+      return linkWooProductWithVariants(productId, fringePayload);
+    })
+  );
 }
 
 async function transferShopifyProductsToWoo() {
@@ -101,17 +131,52 @@ async function transferShopifyProductsToWoo() {
 
     for (const product of products) {
       if (product.status !== "active") {
+        console.log("================ Inactive product. Skip ================");
         continue;
       }
-      const wooCategories = await fetchWooCategoryBySlug(
+
+      const wooCategory = await fetchWooCategoryBySlug(
         handledCollections[collectionId]
       );
 
-      const wooCategory = wooCategories[0];
+      if (!wooCategory) {
+        console.log(
+          "================ This Category not exist on woo. Skip ================"
+        );
+        continue;
+      }
 
       const wooProduct = await fetchWooProductBySlug(product.handle);
 
       if (wooProduct) {
+        if (wooProduct.categories.find((cat) => cat.id === wooCategory.id)) {
+          if (wooCategory.slug === "custom-moroccan-rugs-size") {
+            const attributesPayload = {
+              attributes: [
+                ...wooProduct.attributes,
+                {
+                  name: "Fringes",
+                  visible: true,
+                  variation: true,
+                  options: ["One side", "Both side", "No Fringes"],
+                },
+              ],
+            };
+            await Promise.all([
+              updateWooProduct(wooProduct, attributesPayload),
+              createFringesVariants(wooProduct.id),
+            ]);
+
+            console.log(
+              "================ This belongs to custom size, add fringes variant. ================"
+            );
+          }
+          console.log(
+            `${wooProduct.name} already saved on category: ${wooCategory.name}`
+          );
+          continue;
+        }
+
         const payload = {
           categories: [
             {
@@ -120,9 +185,30 @@ async function transferShopifyProductsToWoo() {
           ],
         };
 
-        await linkWooProductWithCategory(wooProduct.id, payload);
+        if (wooCategory.slug === "custom-moroccan-rugs-size") {
+          const existingAttributes = wooProduct.attributes.map(
+            (attr) => attr.name
+          );
 
-        console.log("Product linked with category");
+          if (!existingAttributes.includes("Fringes")) {
+            payload.attributes = [
+              ...wooProduct.attributes,
+              {
+                name: "Fringes",
+                visible: true,
+                variation: true,
+                options: ["One side", "Both side", "No Fringes"],
+              },
+            ];
+            await createFringesVariants(wooProduct.id);
+          }
+        }
+
+        await updateWooProduct(wooProduct.id, payload);
+
+        console.log(
+          `Product ${wooProduct.name} linked with category ${wooCategory.name}`
+        );
       } else {
         const shopifyProduct = await fetchSingleShopifyProduct(product.id);
         const payload = {
@@ -131,7 +217,11 @@ async function transferShopifyProductsToWoo() {
           type: "variable",
           description: shopifyProduct.body_html,
           price: shopifyProduct.variants[0].price,
-          images: shopifyProduct.images.map(({ src, alt }) => ({ src, alt: alt || 'Moroccan Carpets' })),
+          images:
+            shopifyProduct.images.map(({ src, alt }) => ({
+              src,
+              alt: alt || "Moroccan Carpets",
+            })) || [],
           categories: [
             {
               id: wooCategory.id,
@@ -145,6 +235,15 @@ async function transferShopifyProductsToWoo() {
           })),
         };
 
+        if (wooCategory.slug === "custom-moroccan-rugs-size") {
+          payload.attributes.push({
+            name: "Fringes",
+            visible: true,
+            variation: true,
+            options: ["One side", "Both side", "No Fringes"],
+          });
+        }
+
         const createdProduct = await createWooProduct(payload);
 
         await transferShopifyVariantsToWoo(
@@ -153,7 +252,13 @@ async function transferShopifyProductsToWoo() {
           shopifyProduct.options
         );
 
-        console.log("Product created and linked with category");
+        if (wooCategory.slug === "custom-moroccan-rugs-size") {
+          await createFringesVariants(createdProduct.id);
+        }
+
+        console.log(
+          `Product ${createdProduct.name} created and linked with category ${wooCategory.name}`
+        );
       }
     }
   }
