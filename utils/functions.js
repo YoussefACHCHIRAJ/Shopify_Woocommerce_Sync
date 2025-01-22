@@ -1,4 +1,4 @@
-function splitToChunks(array, size = 10) {
+export function splitToChunks(array, size = 10) {
   const chunks = [];
 
   for (let i = 0; i < array.length; i += size) {
@@ -8,14 +8,10 @@ function splitToChunks(array, size = 10) {
   return chunks;
 }
 
-function getNextPageUrlFromHeader(linkHeader) {
+export function getNextPageUrlFromHeader(linkHeader) {
   if (!linkHeader) return null;
 
   const match = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
   return match ? match[1] : null;
 }
 
-module.exports = {
-  splitToChunks,
-  getNextPageUrlFromHeader
-};
